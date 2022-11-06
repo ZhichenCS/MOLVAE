@@ -40,8 +40,8 @@ class Decoder(nn.Module):
         
         out = self.fc_out(out_3.contiguous().view(-1, 501)).view(_batch_size, self.max_seq_length, self.output_feature_size)
         
-        return F.softmax(out, dim=-1), hidden_1, hidden_2, hidden_3
-        # return F.relu(torch.sigmoid(out)), hidden_1, hidden_2, hidden_3
+        # return F.softmax(out, dim=-1), hidden_1, hidden_2, hidden_3
+        return F.relu(torch.sigmoid(out)), hidden_1, hidden_2, hidden_3
 
     def init_hidden(self, batch_size):
         # NOTE: assume only 1 layer no bi-direction
@@ -52,7 +52,7 @@ class Decoder(nn.Module):
 
 
 class Encoder(nn.Module):
-    def __init__(self, L, k1=9, k2=9, k3=11, hidden_n=56):
+    def __init__(self, k1=9, k2=9, k3=11, hidden_n=56):
         super(Encoder, self).__init__()
         # NOTE: GVAE implementation does not use max-pooling. Original DCNN implementation uses max-k pooling.
         self.conv_1 = nn.Conv1d(in_channels=35, out_channels=9, kernel_size=k1)#, groups=12)
@@ -116,20 +116,20 @@ class VAELoss(nn.Module):
         
         
         
-        return (BCE + KLD) , BCE.detach(), KLD.detach()
+        return (BCE + 0.001*KLD) , BCE.detach(), KLD.detach()
 
 
 class GrammarVariationalAutoEncoder(nn.Module):
     def __init__(self):
         super(GrammarVariationalAutoEncoder, self).__init__()
-        self.encoder = Encoder(15)
+        self.encoder = Encoder()
         self.decoder = Decoder()
         self.name = 'GrammarVAE'
 
     def forward(self, x):
         batch_size = x.size()[0]
         mu, log_var = self.encoder(x)
-        # multiple sampling
+        # todo multiple sampling
         z = self.reparameterize(mu, log_var)
         h1, h2, h3 = self.decoder.init_hidden(batch_size)
         output, h1, h2, h3 = self.decoder(z, h1, h2, h3)

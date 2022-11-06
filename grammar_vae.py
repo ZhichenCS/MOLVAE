@@ -93,7 +93,8 @@ class Session():
         _BCE, _KLD=0,0
         num_batch = 0
         for batch_idx, data in enumerate(loader):
-            data = Variable(data, volatile=True).to(device)
+            # data = Variable(data, volatile=True).to(device)
+            data = data.to(device)
             # do not use CUDA atm
             recon_batch, mu, log_var = self.model(data)
             loss, BCE, KLD= self.loss_fn(data, mu, log_var, recon_batch)
@@ -115,22 +116,26 @@ class Session():
         acc = train_correct / train_total
         return test_loss, acc, _BCE/num_batch, _KLD/num_batch
     
-    def save_model_by_name(self, model, epoch_num):
+    def save_model_by_name(self, model):
         save_dir = os.path.join('checkpoints', model.name)
     
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
-        file_path = os.path.join(save_dir, t+'model-{:05d}.pt'.format(epoch_num))
+        file_path = os.path.join(save_dir, t+'model-{:05d}.pt'.format(self.train_step))
         state = model.state_dict()
         torch.save(state, file_path)
         print('Saved to {}'.format(file_path))
+        
+    def load_model(self, save_dir):
+        self.model = self.model.load_state_dict(torch.load(save_dir))
+        
 
 
 EPOCHS = 100
 BATCH_SIZE = 512
 # import h5py
 
-setup_seed(149)
+setup_seed(49)
 
 def kfold_loader(k, s, e=None):
     if not e:
@@ -176,5 +181,6 @@ for epoch in range(1, EPOCHS + 1):
     writer.add_scalar('test_acc', test_acc, epoch)
     
     
-    sess.save_model_by_name(vae, EPOCHS)
+    
+sess.save_model_by_name(vae)
     

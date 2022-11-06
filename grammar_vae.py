@@ -123,15 +123,18 @@ class Session():
             os.makedirs(save_dir)
         file_path = os.path.join(save_dir, t+'model-{:05d}.pt'.format(self.train_step))
         state = model.state_dict()
-        torch.save(state, file_path)
+        torch.save({'model_state_dict': state, 'optimizer_state_dict': self.optimizer.state_dict()}, file_path)
         print('Saved to {}'.format(file_path))
         
     def load_model(self, save_dir):
-        self.model = self.model.load_state_dict(torch.load(save_dir))
+        ckpt = torch.load(save_dir)
+        
+        self.model.load_state_dict(ckpt['model_state_dict'])
+        self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
         
 
 
-EPOCHS = 100
+EPOCHS = 300
 BATCH_SIZE = 512
 # import h5py
 

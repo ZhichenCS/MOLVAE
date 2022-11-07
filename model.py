@@ -116,7 +116,7 @@ class VAELoss(nn.Module):
         
         
         
-        return (BCE + 0.001*KLD) , BCE.detach(), KLD.detach()
+        return (BCE + KLD) , BCE.detach(), KLD.detach()
 
 
 class GrammarVariationalAutoEncoder(nn.Module):

@@ -16,7 +16,7 @@ import os
 os.environ['HDF5_USE_FILE_LOCKING']='False'
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # device = torch.device('cpu')
-print(device)
+print('Using: ', device)
 import datetime
 t = str(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
@@ -131,10 +131,12 @@ class Session():
         
         self.model.load_state_dict(ckpt['model_state_dict'])
         self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+        self.train_step = int(save_dir.strip().split('/')[-1].split('-')[-1][:-3])
+        print('Loaded from {}'.format(save_dir))
         
 
 
-EPOCHS = 300
+EPOCHS = 600
 BATCH_SIZE = 512
 # import h5py
 
@@ -162,9 +164,11 @@ test_loader = torch.utils \
 
 
 vae = GrammarVariationalAutoEncoder().to(device)
-writer = SummaryWriter('./checkpoints/log/'+t)
 
+writer = SummaryWriter('./checkpoints/log/'+t)
 sess = Session(vae, lr=1e-2)
+# sess.load_model('./checkpoints/GrammarVAE/2022-11-06-17-19model-131700.pt')
+# sess.train_step = 131700
 for epoch in range(1, EPOCHS + 1):
     train_losses, train_acc, train_BCE, train_KLD=sess.train(train_loader, epoch)
     
@@ -172,7 +176,6 @@ for epoch in range(1, EPOCHS + 1):
     sess.scheduler.step(test_loss)
     print('epoch {} complete, train_loss： {}， test_loss: {}, ---train_BCE: {}, train_KLD: {}, acc: {}, test_acc: {}'.format(epoch, 
                                                                                             train_losses, test_loss, train_BCE, train_KLD, train_acc, test_acc))
-    
     
     writer.add_scalar('train_loss/loss', train_losses, epoch)
     writer.add_scalar('train_loss/BCE', train_BCE, epoch)
@@ -183,7 +186,8 @@ for epoch in range(1, EPOCHS + 1):
     writer.add_scalar('train_acc', train_acc, epoch)
     writer.add_scalar('test_acc', test_acc, epoch)
     
-    
+    if epoch % 100 == 0:
+        
+        sess.save_model_by_name(vae)
     
 sess.save_model_by_name(vae)
-    

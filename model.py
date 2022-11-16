@@ -138,7 +138,22 @@ class GrammarVariationalAutoEncoder(nn.Module):
 
     def reparameterize(self, mu, log_var):
         """you generate a random distribution w.r.t. the mu and log_var from the embedding space."""
+        print('mu: ' + str(mu) + 'log_var: ' + str(log_var))
+        import time; time.sleep(0.1)
         vector_size = log_var.size()
-        eps = Variable(torch.FloatTensor(vector_size).normal_(mean=0, std=0.01)).to(device)
+        eps = Variable(torch.FloatTensor(vector_size).normal_(mean=0, std=1)).to(device)
         std = log_var.mul(0.5).exp_()
         return eps.mul(std).add_(mu)
+
+    def enc(self, x):
+        batch_size = x.size()[0]
+        mu, log_var = self.encoder(x)
+        return mu, log_var
+        
+    def dec(self, x, mu, log_var):
+        batch_size = x.size()[0]
+        z = self.reparameterize(mu, log_var)
+        h1, h2, h3 = self.decoder.init_hidden(batch_size)
+        output, h1, h2, h3 = self.decoder(z, h1, h2, h3)
+        return output
+        

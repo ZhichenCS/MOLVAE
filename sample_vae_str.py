@@ -26,7 +26,10 @@ def load_model(model, save_dir):
     
 
 class ZincCharacterModel(object):
-    
+    """_summary_
+
+    used in smiles to smiles generation (reconstruction)
+    """    
     def __init__(self, model, latent_rep_size=56):
         self.MAX_LEN = 120
         self.vae = model
@@ -96,7 +99,11 @@ class property_prediction_net(nn.Module):
     
     
     
-class Dataset:    
+class Dataset:
+    """_summary_
+    readin raw zinc250k smiles and converts to one-hot numpy array,
+    then dump to disk waiting for training.
+    """        
     def __init__(self):
         # raw dataset
         # self.train_prop_file = './data/zinc/train.logP-SA'
@@ -110,9 +117,7 @@ class Dataset:
         # self.val = 'data/zinc/val.pkl'
         # self.test=  'data/zinc/test.pkl'
         
-        self.train = 'data/zinc/property/train.pkl'
-        self.val = 'data/zinc/property/val.pkl'
-        self.test = 'data/zinc/property/test.pkl'
+        
         
         # char setting
         self.MAX_LEN = 120
@@ -205,10 +210,10 @@ class Session():
        
         for batch_idx, data in enumerate(tqdm(loader)):
             
-            smiles, logp, qed = data[0].to(device), data[1].to(device), data[2].to(device)
+            smiles, logp, qed = data[0].to(device).to(torch.float32), data[1].to(device).to(torch.float32), data[2].to(device).to(torch.float32)
             batch_size = len(logp)
             # have to cast data to FloatTensor. DoubleTensor errors with Conv1D
-            mu, log_var = self.vae.encode(smiles)
+            mu, log_var = self.vae.encoder(smiles)
             
             pred = self.model(mu)
             
@@ -244,8 +249,8 @@ class Session():
         for batch_idx, data in enumerate(loader):
             # data = Variable(data, volatile=True).to(device)
             data = data.to(device)
-            smiles, logp, qed = data[0].to(device), data[1].to(device)#, data[2].to(device)
-            mu, log_var = self.vae.encode(smiles)
+            smiles, logp, qed = data[0].to(device).to(torch.float32), data[1].to(device).to(torch.float32), data[2].to(device).to(torch.float32)
+            mu, log_var = self.vae.encoder(smiles)
             
             pred = self.model(mu)
             loss = self.loss_fn(pred, logp)
@@ -300,7 +305,7 @@ def property_prediction(train, val, test):
     batch_szie = 512
     train_loader, val_loader, test_loader = DataLoader(train, batch_szie), DataLoader(val, batch_szie), DataLoader(test, batch_szie)
     epoches = 10
-    sess = Session(net, char_model)
+    sess = Session(net, vae)
     for t in range(epoches):
         train_loss = sess.train(train_loader)
         val_loss = sess.test(val_loader)
@@ -313,6 +318,7 @@ def property_prediction(train, val, test):
 
 class zinc_dataset(torch.utils.data.Dataset):
     def __init__(self, smiles, targets):
+        
         self.smiles = smiles
         self.targets = targets
     
@@ -320,7 +326,7 @@ class zinc_dataset(torch.utils.data.Dataset):
         return len(self.smiles)
     
     def __getitem__(self, idx):
-        return self.smiles[idx], self.targets['logP'][idx]
+        return self.smiles[idx], self.targets['logP'][idx], self.targets['qed'][idx]
     
 def load_csv(csv_file='./data/zinc/250k_rndm_zinc_drugs_clean_3.csv', smiles_field="smiles", target_fields=["logP", "qed"], verbose=0, **kwargs):
     """
@@ -362,7 +368,7 @@ def load_csv(csv_file='./data/zinc/250k_rndm_zinc_drugs_clean_3.csv', smiles_fie
                 smiles.append("")
             for field, value in zip(fields, values):
                 if field == smiles_field:
-                    smiles.append(value)
+                    smiles.append(value.strip())
                 elif target_fields is None or field in target_fields:
                     value = literal_eval(value)
                     if value == "":
@@ -372,6 +378,11 @@ def load_csv(csv_file='./data/zinc/250k_rndm_zinc_drugs_clean_3.csv', smiles_fie
 
 def split_data():
     smiles, targets = load_csv()
+   
+    pipline = Dataset()
+    smiles = pipline._one_hot(smiles)
+    
+    
     
     train_data = smiles[:199564]
     train_targets = dict()
@@ -399,15 +410,13 @@ if __name__ == '__main__':
     split_data()
     with open('data/zinc/property/train.pkl', 'rb') as fin:
         train = pickle.load(fin)
-    
     with open('data/zinc/property/val.pkl', 'rb') as fin:
         val = pickle.load(fin)
     with open('data/zinc/property/test.pkl', 'rb') as fin:
         test = pickle.load(fin)
     
     
-    
-    import pdb; pdb.set_trace()
+
     
     
 

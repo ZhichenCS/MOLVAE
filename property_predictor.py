@@ -17,108 +17,37 @@ import csv
 from collections import defaultdict
 import ast
 import math
+from utils import setup_seed, load_model
+from torch.utils.tensorboard import SummaryWriter
+import datetime 
+t = str(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
-def load_model(model, save_dir):
-    ckpt = torch.load(save_dir)
-    model.load_state_dict(ckpt['model_state_dict'])
-    print('Loaded from {}'.format(save_dir))
-    return model
-    
 
-class ZincCharacterModel(object):
-    """_summary_
 
-    used in smiles to smiles generation (reconstruction)
-    """    
-    def __init__(self, model, latent_rep_size=56):
-        self.MAX_LEN = 120
-        self.vae = model
-        self.charlist = ['C', '(', ')', 'c', '1', '2', 'o', '=', 'O', 'N', '3', 'F', '[',
-                         '@', 'H', ']', 'n', '-', '#', 'S', 'l', '+', 's', 'B', 'r', '/',
-                         '4', '\\', '5', '6', '7', 'I', 'P', '8', ' ']
-        self._char_index = {}
-        for ix, char in enumerate(self.charlist):
-            self._char_index[char] = ix
-        # self.vae.load(self.charlist, weights_file, max_length=self.MAX_LEN, latent_rep_size=latent_rep_size)
-
-    def encode(self, smiles):
-        """ Encode a list of smiles strings into the latent space """
-        indices = [np.array([self._char_index[c] for c in entry], dtype=int) for entry in smiles]
-        one_hot = np.zeros((len(indices), self.MAX_LEN, len(self.charlist)), dtype=np.float32)
-        for i in range(len(indices)):
-            num_productions = len(indices[i])
-            one_hot[i][np.arange(num_productions),indices[i]] = 1.
-            one_hot[i][np.arange(num_productions, self.MAX_LEN),-1] = 1.
-        self.batch_size = len(one_hot)
-        self.one_hot = torch.tensor(one_hot).to(device)
-        mu, log_var = self.vae.encoder(self.one_hot)
-        return mu, log_var
-
-    def decode(self, mu, log_var):
-        """ Sample from the character decoder """
-        # assert z.ndim == 2
-        out = self.vae.dec(self.one_hot, mu, log_var).cpu().detach().numpy()
-        # noise = np.random.gumbel(size=out.shape)
-        sampled_chars = np.argmax(np.log(out) , axis=-1) # + noise
-        char_matrix = np.array(self.charlist)[np.array(sampled_chars, dtype=int)]
-        return [''.join(ch).strip() for ch in char_matrix]
-
-def test_generation():
-    smiles = ["C[C@@H]1CN(C(=O)c2cc(Br)cn2C)CC[C@H]1[NH3+]",
-            "CC[NH+](CC)[C@](C)(CC)[C@H](O)c1cscc1Br",
-            "O=C(Nc1nc[nH]n1)c1cccnc1Nc1cccc(F)c1",
-            "Cc1c(/C=N/c2cc(Br)ccn2)c(O)n2c(nc3ccccc32)c1C#N",
-            "CSc1nncn1/N=C\c1cc(Cl)ccc1F"]
-
-    # ? trained on GPU and loaded on CPU, not sure if would cause problem
-    vae = GrammarVariationalAutoEncoder()
-    char_weights = "checkpoints/GrammarVAE/2022-11-07-09-33model-263400.pt"
-    vae = load_model(vae, char_weights).to(device)
-    vae.eval()
-
-    char_model = ZincCharacterModel(vae)
-
-    # 4. encode and decode
-    z2, log_var = char_model.encode(smiles)
-    for mol in char_model.decode(z2, log_var):
-        print(mol)
- 
 
 class property_prediction_net(nn.Module):
-    def __init__(self, input_size=56, hidden_size=256):
+    
+    def __init__(self, input_size=56, hidden_size=[512,128]):
         super().__init__()
-        self.net = nn.Sequential(nn.Linear(input_size, hidden_size),
+        self.name = 'property_prediction_net'
+        self.net = nn.Sequential(nn.Linear(input_size, hidden_size[0]),
                              nn.ReLU(),
-                             nn.Linear(hidden_size,1)
+                             nn.Linear(hidden_size[0],hidden_size[1]),
+                             nn.ReLU(),
+                             nn.Linear(hidden_size[1], 1)
                              )
 
     def forward(self, x):
-        
+        # ? prediction is otherwise higher rank than label
         return torch.squeeze(self.net(x))
         
-    
-    
-    
-class Dataset:
+class Dict_Embedding:
     """_summary_
     readin raw zinc250k smiles and converts to one-hot numpy array,
     then dump to disk waiting for training.
     """        
     def __init__(self):
-        # raw dataset
-        # self.train_prop_file = './data/zinc/train.logP-SA'
-        # self.train_data_file = './data/zinc/train.txt'
-        # self.val_prop_file = './data/zinc/opt.valid.logP-SA'
-        # self.val_data_file = './data/zinc/valid.txt'
-        # self.test_prop_file = './data/zinc/opt.test.logP-SA'
-        # self.test_data_file = './data/zinc/test.txt'
-        
-        # self.train = 'data/zinc/train.pkl'
-        # self.val = 'data/zinc/val.pkl'
-        # self.test=  'data/zinc/test.pkl'
-        
-        
-        
+
         # char setting
         self.MAX_LEN = 120
         self.charlist = ['C', '(', ')', 'c', '1', '2', 'o', '=', 'O', 'N', '3', 'F', '[',
@@ -127,31 +56,17 @@ class Dataset:
         self._char_index = {}
         for ix, char in enumerate(self.charlist):
             self._char_index[char] = ix
-        
-
-    def _load_raw_data(self, path):
-        with open(path) as f:
-            train_data = [line.strip("\r\n ").split()[0] for line in f]
-        return train_data
-        
-    def load_label(self):
-        import pdb; pdb.set_trace()
-        train_y, val_y, test_y = np.loadtxt(self.train_prop_file), np.loadtxt(self.val_prop_file),  np.loadtxt(self.test_prop_file)
-        return torch.tensor(train_y), torch.tensor(val_y), torch.tensor(test_y)
-        
-        # val_y = np.loadtxt(val_prop_file)
-        # with open(val_data_file) as f:
-        #     val_data = [line.strip("\r\n ").split()[0] for line in f]
-            
-        # test_y = np.loadtxt(test_prop_file)
-        # with open(test_data_file) as f:
-        #     test_data = [line.strip("\r\n ").split()[0] for line in f]
             
     def _process_raw_data(self, path):
         data = self._load_raw_data(path)
         one_hot = self._one_hot(data)
         
         return np.array(one_hot)
+    
+    def _save_processed_data(self, data, path):
+        with open(path, 'wb') as fout:
+            pickle.dump(data, fout)
+        print('Saved processed data')
         
     def data_pipeline(self):
         train_one_hot= self._process_raw_data(self.train_data_file)
@@ -173,13 +88,13 @@ class Dataset:
             one_hot[i][np.arange(num_productions),indices[i]] = 1.
             one_hot[i][np.arange(num_productions, self.MAX_LEN),-1] = 1.
         return one_hot
-
-    def _save_processed_data(self, data, path):
-        with open(path, 'wb') as fout:
-            pickle.dump(data, fout)
-        print('Saved processed data')
-
+    
     def load_data(self):
+        """_summary_
+            used for downstream output api
+        Returns:
+            _type_: _description_
+        """        
         with open(self.train, "rb") as fin:
             train = pickle.load(fin)
         with open(self.train, "rb") as fin:
@@ -188,8 +103,6 @@ class Dataset:
             test = pickle.load(fin)
         return torch.tensor(train), torch.tensor(val), torch.tensor(test)
     
-
-
 class Session():
     def __init__(self, model, vae, train_step_init=0, lr=1e-2, is_cuda=False):
         self.train_step = train_step_init
@@ -198,12 +111,12 @@ class Session():
         self.optimizer = optim.Adam(model.parameters(), lr=lr)
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.2, patience=3, min_lr=0.0001)
         self.loss_fn = nn.MSELoss()
-        # self.dashboard = Dashboard('Grammar-Variational-Autoencoder-experiment')
+        self.log = SummaryWriter('./checkpoints/property_prediction_net/log/'+t)
+        
 
     def train(self, loader):
-        # built-in method for the nn.module, sets a training flag.
-        size = len(loader.dataset)
         
+        size = len(loader.dataset)
         self.model.train()
         _losses = []
 
@@ -255,22 +168,20 @@ class Session():
             pred = self.model(mu)
             loss = self.loss_fn(pred, logp)
             test_loss += loss.cpu().item()
-            
-            
-        
+
         test_loss /= num_batch
         # print(' testset length', size)
         # print(' ====> Test set loss: {:.4f}'.format(test_loss))
         
         return test_loss
     
-    def save_model_by_name(self, model):
-        save_dir = os.path.join('checkpoints', model.name)
+    def save_model_by_name(self):
+        save_dir = os.path.join('checkpoints', self.model.name)
     
         if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         file_path = os.path.join(save_dir, t+'model-{:05d}.pt'.format(self.train_step))
-        state = model.state_dict()
+        state = self.model.state_dict()
         torch.save({'model_state_dict': state, 'optimizer_state_dict': self.optimizer.state_dict()}, file_path)
         print('Saved to {}'.format(file_path))
         
@@ -282,39 +193,15 @@ class Session():
         self.train_step = int(save_dir.strip().split('/')[-1].split('-')[-1][:-3])
         print('Loaded from {}'.format(save_dir))
         
-    
-
-def property_prediction(train, val, test):
-    # 1. create property predictor
-    net = property_prediction_net().to(device)
-    
-    # 2. load encoding model
-    vae = GrammarVariationalAutoEncoder().to(device)
-    char_weights = "checkpoints/GrammarVAE/2022-11-07-09-33model-263400.pt"
-    vae = load_model(vae, char_weights)
-    vae.eval()    
-    
-    # 3. load pre_processed pytorch.utils.data.Dataset
-    batch_szie = 512
-    train_loader, val_loader, test_loader = DataLoader(train, batch_szie), DataLoader(val, batch_szie), DataLoader(test, batch_szie)
-    
-    # 4. create training session
-    epoches = 10
-    sess = Session(net, vae)
-    for t in range(epoches):
-        train_loss = sess.train(train_loader)
-        val_loss = sess.test(val_loader)
-        sess.scheduler.step(val_loss)
-        test_loss = sess.test(test_loader)
-        print('==================Epoch {} complete. ==================\n'+
-              '===> train loss: {}\n'+
-              '===> val_loss:{}\n' + 
-              '===> test_loss: {}\n'.format(t, train_loss, val_loss, test_loss))
-    
-    print('done')
 
 
 class zinc_dataset(torch.utils.data.Dataset):
+    """_summary_
+
+    Args:
+        np.array: one-hot embeddings of smiles
+        python dict: the regressor's label
+    """    
     def __init__(self, smiles, targets):
         
         self.smiles = smiles
@@ -377,7 +264,7 @@ def load_csv(csv_file='./data/zinc/250k_rndm_zinc_drugs_clean_3.csv', smiles_fie
 def split_data():
     smiles, targets = load_csv()
    
-    pipline = Dataset()
+    pipline = Dict_Embedding()
     smiles = pipline._one_hot(smiles)
 
     train_data = smiles[:199564]
@@ -401,6 +288,41 @@ def split_data():
         pickle.dump(val, fout)
     with open('data/zinc/property/test.pkl', 'wb') as fout:
         pickle.dump(test, fout)
+
+
+def property_prediction(train, val, test):
+    # 1. create property predictor
+    net = property_prediction_net().to(device)
+    
+    # 2. load encoding model
+    vae = GrammarVariationalAutoEncoder().to(device)
+    char_weights = "checkpoints/GrammarVAE/2022-11-07-09-33model-263400.pt"
+    vae = load_model(vae, char_weights)
+    vae.eval()    
+    
+    # 3. load pre_processed pytorch.utils.data.Dataset
+    batch_szie = 512
+    train_loader, val_loader, test_loader = DataLoader(train, batch_szie), DataLoader(val, batch_szie), DataLoader(test, batch_szie)
+    
+    # 4. create training session
+    epoches = 100
+    sess = Session(net, vae)
+    for t in range(epoches):
+        train_loss = sess.train(train_loader)
+        val_loss = sess.test(val_loader)
+        sess.scheduler.step(val_loss)
+        test_loss = sess.test(test_loader)
+        # * tensorboarding here
+        sess.log.add_scalar('loss/train_loss', train_loss, t)
+        sess.log.add_scalar('loss/val_loss', val_loss, t)
+        sess.log.add_scalar('loss/test_loss', test_loss, t)
+        print(('==================Epoch {} complete. ==================\n'+
+              '===> train loss: {}\n'+
+              '===> val_loss:{}\n' + 
+              '===> test_loss: {}\n').format(t, train_loss, val_loss, test_loss))
+    
+    sess.save_model_by_name()
+    print('done')
     
 if __name__ == '__main__':
     # split_data() # only need done once
@@ -410,7 +332,8 @@ if __name__ == '__main__':
         val = pickle.load(fin)
     with open('data/zinc/property/test.pkl', 'rb') as fin:
         test = pickle.load(fin)
-
+        
+    setup_seed(49)
     property_prediction(train, val, test)
         
         

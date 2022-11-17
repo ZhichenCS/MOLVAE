@@ -2,7 +2,32 @@ import sys
 from termcolor import cprint as _cprint, colored as c
 from pprint import pprint
 import traceback
+import numpy as np
+import random
+import torch
 
+
+def setup_seed(seed):
+     torch.manual_seed(seed)
+     torch.cuda.manual_seed_all(seed)
+     np.random.seed(seed)
+     torch.backends.cudnn.deterministic=True
+     random.seed(seed)
+    
+def load_model(model, save_dir):
+    """_summary_
+
+    Args:
+        model (_type_): pytorch model
+        save_dir (dict): 'model_state_dict', 'optimizer_state_dict'
+
+    Returns:
+        _type_: _description_
+    """    
+    ckpt = torch.load(save_dir)
+    model.load_state_dict(ckpt['model_state_dict'])
+    print('Loaded from {}'.format(save_dir))
+    return model
 
 class Ledger():
     def __init__(self, debug=True):

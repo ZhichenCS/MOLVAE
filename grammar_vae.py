@@ -11,6 +11,7 @@ from tqdm import tqdm
 from model import GrammarVariationalAutoEncoder, VAELoss
 import pickle
 
+from utils import setup_seed
 # from visdom_helper.visdom_helper import Dashboard
 import os
 os.environ['HDF5_USE_FILE_LOCKING']='False'
@@ -20,11 +21,7 @@ print('Using: ', device)
 import datetime
 t = str(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
-def setup_seed(seed):
-     torch.manual_seed(seed)
-     torch.cuda.manual_seed_all(seed)
-     np.random.seed(seed)
-     torch.backends.cudnn.deterministic=True
+
 
 class Session():
     def __init__(self, model, train_step_init=0, lr=1e-2, is_cuda=False):

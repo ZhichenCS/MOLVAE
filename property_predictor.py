@@ -1,5 +1,5 @@
 import os
-os.environ['CUDA_VISIBLE_DEVICES']='1'
+os.environ['CUDA_VISIBLE_DEVICES']='0'
 
 import sys
 import numpy as np
@@ -27,14 +27,18 @@ t = str(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
 class property_prediction_net(nn.Module):
     
-    def __init__(self, input_size=56, hidden_size=[512,128]):
+    def __init__(self, input_size=56, hidden_size=[512,64]):
         super().__init__()
         self.name = 'property_prediction_net'
         self.net = nn.Sequential(nn.Linear(input_size, hidden_size[0]),
-                             nn.ReLU(),
+                             nn.Dropout(0.5),
+                             nn.ELU(),
                              nn.Linear(hidden_size[0],hidden_size[1]),
-                             nn.ReLU(),
-                             nn.Linear(hidden_size[1], 1)
+                             nn.Dropout(0.5),
+                             nn.ELU(),
+                            #  nn.Linear(hidden_size[1], hidden_size[2]),
+                            #  nn.ELU(),
+                             nn.Linear(hidden_size[1],1)
                              )
 
     def forward(self, x):
@@ -108,8 +112,12 @@ class Session():
         self.train_step = train_step_init
         self.model = model
         self.vae = vae
-        self.optimizer = optim.Adam(model.parameters(), lr=lr)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.2, patience=3, min_lr=0.0001)
+        self.optimizer = optim.Adam(model.parameters(), lr=lr)#, weight_decay=0.001
+        
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.6, patience=3, min_lr=0.003)
+        # self.scheduler =  optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.98) # lr * gamma**epoch
+        # self.scheduler = None
+        # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.9)
         self.loss_fn = nn.MSELoss()
         self.log = SummaryWriter('./checkpoints/property_prediction_net/log/'+t)
         
@@ -118,6 +126,7 @@ class Session():
         
         size = len(loader.dataset)
         self.model.train()
+        self.vae.eval()
         _losses = []
 
        
@@ -159,6 +168,7 @@ class Session():
         num_batch = len(loader)
         test_loss = 0
         self.model.eval()
+        self.vae.eval()
         for batch_idx, data in enumerate(loader):
             # data = Variable(data, volatile=True).to(device)
             
@@ -174,6 +184,18 @@ class Session():
         # print(' ====> Test set loss: {:.4f}'.format(test_loss))
         
         return test_loss
+    
+    def demo_result(self, test_loader):
+        data = next(iter(test_loader))
+        smiles, logp, qed = data[0].to(device).to(torch.float32), data[1].to(device).to(torch.float32), data[2].to(device).to(torch.float32)
+        mu, log_var = self.vae.encoder(smiles)
+        
+        pred = self.model(mu)
+        import pdb; pdb.set_trace()
+        ret = pred - logp
+        print('compare prediction and target: ', ret)
+            
+        
     
     def save_model_by_name(self):
         save_dir = os.path.join('checkpoints', self.model.name)
@@ -192,7 +214,8 @@ class Session():
         self.optimizer.load_state_dict(ckpt['optimizer_state_dict'])
         self.train_step = int(save_dir.strip().split('/')[-1].split('-')[-1][:-3])
         print('Loaded from {}'.format(save_dir))
-        
+    
+    
 
 
 class zinc_dataset(torch.utils.data.Dataset):
@@ -307,15 +330,18 @@ def property_prediction(train, val, test):
     # 4. create training session
     epoches = 100
     sess = Session(net, vae)
+    # sess.load_model('checkpoints/property_prediction_net/2022-11-17-10-04model-39000.pt')
+    # sess.demo_result(test_loader)
     for t in range(epoches):
         train_loss = sess.train(train_loader)
         val_loss = sess.test(val_loader)
-        sess.scheduler.step(val_loss)
+        if sess.scheduler: sess.scheduler.step(val_loss) #
         test_loss = sess.test(test_loader)
         # * tensorboarding here
         sess.log.add_scalar('loss/train_loss', train_loss, t)
         sess.log.add_scalar('loss/val_loss', val_loss, t)
         sess.log.add_scalar('loss/test_loss', test_loss, t)
+        sess.log.add_scalar('loss/learning rate', sess.optimizer.state_dict()['param_groups'][0]['lr'], t) 
         print(('==================Epoch {} complete. ==================\n'+
               '===> train loss: {}\n'+
               '===> val_loss:{}\n' + 
@@ -323,6 +349,52 @@ def property_prediction(train, val, test):
     
     sess.save_model_by_name()
     print('done')
+
+def get_embedding(train, val, test):
+    # 2. load encoding model
+    vae = GrammarVariationalAutoEncoder().to(device)
+    char_weights = "checkpoints/GrammarVAE/2022-11-07-09-33model-219500.pt"
+    vae = load_model(vae, char_weights)
+    vae.eval()    
+    
+    # 3. load pre_processed pytorch.utils.data.Dataset
+    batch_szie = 512
+    train_loader, val_loader, test_loader = DataLoader(train, batch_szie), DataLoader(val, batch_szie), DataLoader(test, batch_szie)
+    
+    embeddings = []
+    train_logp = []
+
+    for data in tqdm(train_loader):
+            
+            smiles, logp, qed = data[0].to(device).to(torch.float32), data[1].to(device).to(torch.float32), data[2].to(device).to(torch.float32)
+            batch_size = len(logp)
+            # have to cast data to FloatTensor. DoubleTensor errors with Conv1D
+            mu, log_var = vae.encoder(smiles)
+            
+            embeddings.extend(list(mu.cpu().detach().numpy()))
+            train_logp.extend(list(logp.cpu().detach().numpy()))
+    
+    embeddings = np.array(embeddings)
+    train_logp = np.array(train_logp)
+    with open('./data/zinc/property/train_embeddings.pkl', 'wb') as fout:
+        pickle.dump(embeddings, fout)
+    with open('./data/zinc/property/train_logp.pkl', 'wb') as fout:
+        pickle.dump(train_logp, fout)
+ 
+def visual_embeddings():
+    with open('./data/zinc/property/train_embeddings.pkl', 'rb') as fin:
+        embeddings = pickle.load(fin)
+    with open('./data/zinc/property/train_logp.pkl', 'rb') as fin:
+        logp = pickle.load(fin)
+    from sklearn import manifold
+    import pylab
+    
+    tsne = manifold.TSNE(perplexity=20)
+    Y = tsne.fit_transform(embeddings[:10000,:])
+    pylab.scatter(Y[:, 0], Y[:, 1], 20, logp[:10000])
+    pylab.show()
+    pylab.savefig('./fig.jpg')
+
     
 if __name__ == '__main__':
     # split_data() # only need done once
@@ -332,8 +404,10 @@ if __name__ == '__main__':
         val = pickle.load(fin)
     with open('data/zinc/property/test.pkl', 'rb') as fin:
         test = pickle.load(fin)
-        
+
     setup_seed(49)
+    # get_embedding(train,val,test)
+    # visual_embeddings()
     property_prediction(train, val, test)
         
         

@@ -28,7 +28,7 @@ class Session():
         self.train_step = train_step_init
         self.model = model
         self.optimizer = optim.Adam(model.parameters(), lr=lr)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.2, patience=3, min_lr=0.0001)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.6, patience=3, min_lr=0.0001)
         self.loss_fn = VAELoss()
         # self.dashboard = Dashboard('Grammar-Variational-Autoencoder-experiment')
 
@@ -183,8 +183,5 @@ for epoch in range(1, EPOCHS + 1):
     writer.add_scalar('train_acc', train_acc, epoch)
     writer.add_scalar('test_acc', test_acc, epoch)
     
-    if epoch % 100 == 0:
-        
-        sess.save_model_by_name(vae)
-    
+
 sess.save_model_by_name(vae)

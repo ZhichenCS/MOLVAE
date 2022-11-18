@@ -17,6 +17,9 @@ import csv
 from collections import defaultdict
 import ast
 import math
+
+from pytorchtools import EarlyStopping
+
 from utils import setup_seed, load_model
 from torch.utils.tensorboard import SummaryWriter
 import datetime 
@@ -27,18 +30,23 @@ t = str(datetime.datetime.now().strftime('%Y-%m-%d-%H-%M'))
 
 class property_prediction_net(nn.Module):
     
-    def __init__(self, input_size=56, hidden_size=[512,64]):
+    def __init__(self, input_size=56, hidden_size=[1024,768,512,128,64]):
         super().__init__()
         self.name = 'property_prediction_net'
         self.net = nn.Sequential(nn.Linear(input_size, hidden_size[0]),
+                             nn.ELU(),
+                             nn.Linear(hidden_size[0],hidden_size[1]),                             
+                             nn.ELU(),
+                             nn.Linear(hidden_size[1], hidden_size[2]),
+                            #  nn.Dropout(0.5),
+                             nn.ELU(),
+                             nn.Linear(hidden_size[2], hidden_size[3]),
                              nn.Dropout(0.5),
                              nn.ELU(),
-                             nn.Linear(hidden_size[0],hidden_size[1]),
+                             nn.Linear(hidden_size[3], hidden_size[4]),
                              nn.Dropout(0.5),
                              nn.ELU(),
-                            #  nn.Linear(hidden_size[1], hidden_size[2]),
-                            #  nn.ELU(),
-                             nn.Linear(hidden_size[1],1)
+                             nn.Linear(hidden_size[4],1)
                              )
 
     def forward(self, x):
@@ -112,9 +120,9 @@ class Session():
         self.train_step = train_step_init
         self.model = model
         self.vae = vae
-        self.optimizer = optim.Adam(model.parameters(), lr=lr)#, weight_decay=0.001
+        self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=0.001)#
         
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.6, patience=3, min_lr=0.003)
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, factor=0.6, patience=3, min_lr=3e-4)
         # self.scheduler =  optim.lr_scheduler.ExponentialLR(self.optimizer, gamma=0.98) # lr * gamma**epoch
         # self.scheduler = None
         # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=10, gamma=0.9)
@@ -328,13 +336,15 @@ def property_prediction(train, val, test):
     train_loader, val_loader, test_loader = DataLoader(train, batch_szie), DataLoader(val, batch_szie), DataLoader(test, batch_szie)
     
     # 4. create training session
-    epoches = 100
+    early_stop = EarlyStopping()
+    epoches = 600
     sess = Session(net, vae)
     # sess.load_model('checkpoints/property_prediction_net/2022-11-17-10-04model-39000.pt')
     # sess.demo_result(test_loader)
     for t in range(epoches):
         train_loss = sess.train(train_loader)
         val_loss = sess.test(val_loader)
+        if early_stop(val_loss).early_stop: print('Early stopping'); break
         if sess.scheduler: sess.scheduler.step(val_loss) #
         test_loss = sess.test(test_loader)
         # * tensorboarding here
